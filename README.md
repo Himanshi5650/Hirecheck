@@ -102,7 +102,3 @@ This project helped me understand:
 - Add better UI for recruiters  
 
 ---
-
-## Note
-
-The output is AI-generated and should be used as a support tool, not as a final hiring decision.
