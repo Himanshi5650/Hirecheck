@@ -146,6 +146,50 @@
   .field textarea:focus { border-color: rgba(200,240,96,0.4); }
   .field textarea::placeholder { color: #44443e; }
 
+  .upload-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+
+  .file-input {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .upload-btn {
+    background: transparent;
+    border: 1px solid var(--border2);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .upload-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .upload-note {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .resume-status {
+    display: none;
+    font-size: 12px;
+    margin-top: 4px;
+  }
+
+  .resume-status.active { display: block; }
+  .resume-status.info { color: var(--muted); }
+  .resume-status.success { color: var(--good); }
+  .resume-status.error { color: #ff9999; }
+
   .btn-analyze {
     width: 100%;
     padding: 16px;
@@ -372,6 +416,12 @@ Example:
 Name | B.Tech CS 2025
 Skills: Python, FastAPI, Docker, AWS, RAG pipelines, Scikit-learn
 Projects: Education & Career Recommendation System (Flask + ML)..."></textarea>
+      <div class="upload-row">
+        <input id="resumeFile" class="file-input" type="file" accept=".pdf,.docx" onchange="uploadResumeFile(true)" />
+        <button id="uploadBtn" class="upload-btn" type="button" onclick="uploadResumeFile()">Upload Resume File</button>
+        <span class="upload-note">PDF and DOCX supported</span>
+      </div>
+      <div id="resumeStatus" class="resume-status"></div>
     </div>
   </div>
 
@@ -446,7 +496,7 @@ Projects: Education & Career Recommendation System (Flask + ML)..."></textarea>
 </main>
 
 <footer class="footer">
-  HireCheck · Built with Groq API (llama3-8b-8192) · Free to use
+  HireCheck · Built with Groq API · Free to use
 </footer>
 
 <script>
@@ -458,6 +508,8 @@ const steps = [
   'Writing analysis...'
 ];
 
+let resumeUploadInProgress = false;
+
 function showError(msg) {
   const box = document.getElementById('errorBox');
   box.textContent = msg;
@@ -468,12 +520,95 @@ function hideError() {
   document.getElementById('errorBox').classList.remove('active');
 }
 
+function setResumeStatus(message, type = 'info') {
+  const status = document.getElementById('resumeStatus');
+  status.textContent = message || '';
+  status.className = 'resume-status';
+
+  if (!message) {
+    return;
+  }
+
+  status.classList.add('active');
+  if (type === 'success' || type === 'error' || type === 'info') {
+    status.classList.add(type);
+  } else {
+    status.classList.add('info');
+  }
+}
+
+async function uploadResumeFile(silent = false) {
+  hideError();
+
+  const fileInput = document.getElementById('resumeFile');
+  const uploadBtn = document.getElementById('uploadBtn');
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  const file = fileInput.files[0];
+
+  if (!file) {
+    if (!silent) showError('Please choose a PDF or DOCX resume file first.');
+    setResumeStatus('', 'info');
+    return false;
+  }
+
+  if (resumeUploadInProgress) {
+    return false;
+  }
+
+  resumeUploadInProgress = true;
+  uploadBtn.disabled = true;
+  analyzeBtn.disabled = true;
+  uploadBtn.textContent = 'Uploading...';
+  setResumeStatus('Extracting resume text...', 'info');
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/extract-resume', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || 'Could not extract text from file.');
+    }
+
+    const extractedText = (data.resume_text || '').trim();
+    document.getElementById('resume').value = extractedText;
+    setResumeStatus('Resume extracted successfully.', 'success');
+    return true;
+  } catch (err) {
+    if (!silent) showError('Upload error: ' + err.message);
+    setResumeStatus('Could not extract text from the selected file.', 'error');
+    return false;
+  } finally {
+    resumeUploadInProgress = false;
+    uploadBtn.disabled = false;
+    analyzeBtn.disabled = false;
+    uploadBtn.textContent = 'Upload Resume File';
+  }
+}
+
 async function analyze() {
   hideError();
   const jd = document.getElementById('jobDesc').value.trim();
-  const resume = document.getElementById('resume').value.trim();
+  let resume = document.getElementById('resume').value.trim();
+  const selectedResumeFile = document.getElementById('resumeFile').files[0];
 
   if (!jd) { showError('Please paste the job description.'); return; }
+
+  // If user selected a file but did not click upload, extract it automatically.
+  if (!resume && selectedResumeFile) {
+    const extracted = await uploadResumeFile(true);
+    resume = document.getElementById('resume').value.trim();
+    if (!extracted || !resume) {
+      showError('Could not extract text from the selected file. Please click Upload Resume File or paste the resume.');
+      return;
+    }
+  }
+
   if (!resume) { showError('Please paste the candidate resume.'); return; }
 
   document.getElementById('analyzeBtn').disabled = true;
@@ -557,6 +692,8 @@ function renderResult(r) {
 function reset() {
   document.getElementById('jobDesc').value = '';
   document.getElementById('resume').value = '';
+  document.getElementById('resumeFile').value = '';
+  setResumeStatus('', 'info');
   document.getElementById('resultSection').classList.remove('active');
   hideError();
   window.scrollTo({ top: 0, behavior: 'smooth' });

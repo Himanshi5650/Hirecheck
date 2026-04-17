@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 import os
+from io import BytesIO
+from pypdf import PdfReader
+from docx import Document
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,6 +28,47 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 class ScreenRequest(BaseModel):
     job_description: str
     resume: str
+
+
+def extract_resume_text(filename: str, file_bytes: bytes) -> str:
+    lower_name = filename.lower()
+
+    if lower_name.endswith(".pdf"):
+        reader = PdfReader(BytesIO(file_bytes))
+        text_parts = [(page.extract_text() or "") for page in reader.pages]
+        return "\n".join(part.strip() for part in text_parts if part.strip())
+
+    if lower_name.endswith(".docx"):
+        document = Document(BytesIO(file_bytes))
+        text_parts = [p.text.strip() for p in document.paragraphs if p.text.strip()]
+        return "\n".join(text_parts)
+
+    raise HTTPException(
+        status_code=400,
+        detail="Unsupported file type. Please upload a PDF or DOCX file."
+    )
+
+
+@app.post("/extract-resume")
+async def extract_resume(file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file selected.")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    try:
+        text = extract_resume_text(file.filename, raw)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {exc}")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No readable text found in the file.")
+
+    return {"resume_text": text}
 
 @app.post("/analyze")
 async def analyze(data: ScreenRequest):
